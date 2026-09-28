@@ -1,0 +1,15 @@
+/build/
+/dist/
+/generated/
+/test-output/
+/source/
+/artifacts/
+/Inter_18pt-Regular.ttf
+/.private/
+*.otf
+*.ttf
+/scripts/make_icon.py
+/assets/icon.svg
+*.user
+*.pdb
+build-engine.log
