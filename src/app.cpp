@@ -172,10 +172,16 @@ class App {
     ID2D1Factory *factory = nullptr;
     IDWriteFactory *textFactory = nullptr;
     IWICImagingFactory *wic = nullptr;
-    ID2D1HwndRenderTarget *target = nullptr;
+    ID2D1DCRenderTarget *target = nullptr;
     ID2D1SolidColorBrush *brush = nullptr;
     ID2D1Bitmap *preview = nullptr;
+    IWICBitmap *previewPixels = nullptr;
     ID2D1Bitmap *iconBitmap = nullptr, *markBitmap = nullptr;
+    bool bitmapResourcesTried = false;
+#ifdef SQUEEZE_UI_TESTING
+    bool testMissingIcons = false, testDeviceLoss = false;
+    UINT testDpi = 0;
+#endif
     VideoDrop *dropTarget = nullptr;
     std::array<IDWriteTextFormat *, 10> formats{};
     uint64_t startTick = 0;
@@ -190,6 +196,7 @@ class App {
         if (detectionThread.joinable())
             detectionThread.join();
         release(preview);
+        release(previewPixels);
         release(iconBitmap);
         release(markBitmap);
         release(brush);
@@ -206,6 +213,10 @@ class App {
     }
     bool initialize() {
         dpi = GetDpiForWindow(hwnd);
+#ifdef SQUEEZE_UI_TESTING
+        if (testDpi)
+            dpi = testDpi;
+#endif
         BOOL animate = TRUE;
         SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animate, 0);
         reducedMotion = !animate;
@@ -379,6 +390,7 @@ class App {
         targetProgress = displayProgress = 0;
         cancelOperation = false;
         release(preview);
+        release(previewPixels);
         unitOpen = false;
         InvalidateRect(hwnd, nullptr, FALSE);
         worker = std::thread([this, file] {
@@ -630,6 +642,10 @@ class App {
         return DefSubclassProc(control, msg, wp, lp);
     }
     bool loadBitmapResource(UINT id, ID2D1Bitmap **bitmap) {
+#ifdef SQUEEZE_UI_TESTING
+        if (testMissingIcons)
+            return false;
+#endif
         auto module = GetModuleHandleW(nullptr);
         auto resource = FindResourceW(module, MAKEINTRESOURCEW(id), RT_RCDATA);
         if (!resource || !wic || !target)
@@ -642,8 +658,9 @@ class App {
         IWICFormatConverter *converter = nullptr;
         bool loaded = data && bytes && SUCCEEDED(wic->CreateStream(&stream)) &&
                       SUCCEEDED(stream->InitializeFromMemory(data, bytes)) &&
-                      SUCCEEDED(wic->CreateDecoderFromStream(stream, nullptr, WICDecodeMetadataCacheOnLoad,
-                                                            &decoder)) &&
+                      SUCCEEDED(CoCreateInstance(CLSID_WICPngDecoder, nullptr, CLSCTX_INPROC_SERVER,
+                                                 IID_PPV_ARGS(&decoder))) &&
+                      SUCCEEDED(decoder->Initialize(stream, WICDecodeMetadataCacheOnLoad)) &&
                       SUCCEEDED(decoder->GetFrame(0, &frame)) &&
                       SUCCEEDED(wic->CreateFormatConverter(&converter)) &&
                       SUCCEEDED(converter->Initialize(frame, GUID_WICPixelFormat32bppPBGRA,
@@ -661,26 +678,28 @@ class App {
             return true;
         if (!factory || !textFactory)
             return false;
-        RECT r{};
-        GetClientRect(hwnd, &r);
-        if (FAILED(factory->CreateHwndRenderTarget(
-                D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT,
-                                             D2D1::PixelFormat(DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_IGNORE),
-                                             float(dpi), float(dpi)),
-                D2D1::HwndRenderTargetProperties(hwnd, D2D1::SizeU(r.right, r.bottom),
-                                                 D2D1_PRESENT_OPTIONS_IMMEDIATELY),
-                &target)))
+        // GDI presentation and software rasterization avoid the display GPU/driver entirely.
+        auto properties = D2D1::RenderTargetProperties(
+            D2D1_RENDER_TARGET_TYPE_SOFTWARE,
+            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE), float(dpi), float(dpi));
+        if (FAILED(factory->CreateDCRenderTarget(&properties, &target)))
             return false;
         target->CreateSolidColorBrush(color(0), &brush);
         target->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
-        if (!brush || !loadBitmapResource(103, &iconBitmap) || !loadBitmapResource(104, &markBitmap)) {
-            release(iconBitmap);
-            release(markBitmap);
+        if (!brush) {
             release(brush);
             release(target);
             return false;
         }
         return true;
+    }
+    void discardGraphics() {
+        release(preview);
+        release(iconBitmap);
+        release(markBitmap);
+        release(brush);
+        release(target);
+        bitmapResourcesTried = false;
     }
     void fill(D2D1_RECT_F r, UINT32 c, float radius = 10, float a = 1) {
         brush->SetColor(color(c, a));
@@ -762,18 +781,18 @@ class App {
     void loadPreview(const fs::path &path) {
         if (path.empty())
             return;
-        resources();
         IWICBitmapDecoder *decoder = nullptr;
         IWICBitmapFrameDecode *frame = nullptr;
         IWICFormatConverter *converter = nullptr;
-        if (wic && target &&
+        if (wic &&
             SUCCEEDED(wic->CreateDecoderFromFilename(path.c_str(), nullptr, GENERIC_READ,
                                                      WICDecodeMetadataCacheOnLoad, &decoder)) &&
             SUCCEEDED(decoder->GetFrame(0, &frame)) && SUCCEEDED(wic->CreateFormatConverter(&converter)) &&
             SUCCEEDED(converter->Initialize(frame, GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone,
                                             nullptr, 0, WICBitmapPaletteTypeMedianCut))) {
             release(preview);
-            target->CreateBitmapFromWicBitmap(converter, nullptr, &preview);
+            release(previewPixels);
+            wic->CreateBitmapFromSource(converter, WICBitmapCacheOnLoad, &previewPixels);
         }
         release(converter);
         release(frame);
@@ -784,10 +803,32 @@ class App {
     void paint() {
         PAINTSTRUCT paint{};
         BeginPaint(hwnd, &paint);
-        if (!resources()) {
+        RECT client{};
+        GetClientRect(hwnd, &client);
+        if (!client.right || !client.bottom) {
             EndPaint(hwnd, &paint);
             return;
         }
+        if (!resources() || FAILED(target->BindDC(paint.hdc, &client))) {
+            discardGraphics();
+            FillRect(paint.hdc, &client, GetSysColorBrush(COLOR_WINDOW));
+            auto previous = SelectObject(paint.hdc, inputFont);
+            SetBkMode(paint.hdc, TRANSPARENT);
+            SetTextColor(paint.hdc, RGB(48, 54, 59));
+            DrawTextW(paint.hdc, L"Unable to draw the window. Restart Squeeze.", -1, &client,
+                      DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            SelectObject(paint.hdc, previous);
+            EndPaint(hwnd, &paint);
+            return;
+        }
+        // Decorative images never gate the rest of the interface.
+        if (!bitmapResourcesTried) {
+            bitmapResourcesTried = true;
+            loadBitmapResource(103, &iconBitmap);
+            loadBitmapResource(104, &markBitmap);
+        }
+        if (previewPixels && !preview)
+            target->CreateBitmapFromWicBitmap(previewPixels, nullptr, &preview);
         target->BeginDraw();
         target->Clear(color(0xf5f6f8));
         // Lightweight custom title bar, with native resize, snap, DPI and shadow behavior.
@@ -965,7 +1006,7 @@ class App {
             fill(zones[Folder], 0xd4eddf, 8, hoverAlpha[Folder]);
             text(L"Show in folder", zones[Folder], 2, 0x30785c, DWRITE_TEXT_ALIGNMENT_CENTER);
         }
-        text(L"Squeeze 1.0", zones[About], 0, hover == About ? 0x1460f5 : 0x9aa3ad,
+        text(L"Squeeze 1.0.1", zones[About], 0, hover == About ? 0x1460f5 : 0x9aa3ad,
              DWRITE_TEXT_ALIGNMENT_TRAILING);
         if (keyboardFocus && GetFocus() == hwnd && focus != None && focus != Size)
             border(rect(zones[focus].left - 3, zones[focus].top - 3, width(zones[focus]) + 6,
@@ -993,24 +1034,27 @@ class App {
             auto card = rect(w / 2 - 220, h / 2 - 140, 440, 280);
             fill(card, 0xffffff, 14);
             border(card, 0xc4ccd6, 14);
-            text(L"Squeeze 1.0", rect(card.left + 28, card.top + 22, 384, 34), 6, 0x30363b);
+            text(L"Squeeze 1.0.1", rect(card.left + 28, card.top + 22, 384, 34), 6, 0x30363b);
             text(L"MIT License", rect(card.left + 28, card.top + 76, 384, 24), 3, 0x30363b);
             text(L"FFmpeg / x264: GPL", rect(card.left + 28, card.top + 106, 384, 24), 2, 0x84909a);
             text(L"No warranty.", rect(card.left + 28, card.top + 132, 384, 24), 2, 0x84909a);
-            text(L"Source: Squeeze-1.0-source.zip", rect(card.left + 28, card.top + 163, 384, 24), 1,
+            text(L"Source: Squeeze-1.0.1-source.zip", rect(card.left + 28, card.top + 163, 384, 24), 1,
                  0x84909a);
             fill(zones[AboutClose], 0x1460f5, 10);
             text(L"Close", zones[AboutClose], 3, 0xffffff, DWRITE_TEXT_ALIGNMENT_CENTER);
         }
         HRESULT hr = target->EndDraw();
-        if (hr == D2DERR_RECREATE_TARGET) {
-            release(preview);
-            release(iconBitmap);
-            release(markBitmap);
-            release(brush);
-            release(target);
+#ifdef SQUEEZE_UI_TESTING
+        if (testDeviceLoss) {
+            testDeviceLoss = false;
+            hr = D2DERR_RECREATE_TARGET;
         }
+#endif
+        if (FAILED(hr))
+            discardGraphics();
         EndPaint(hwnd, &paint);
+        if (FAILED(hr))
+            InvalidateRect(hwnd, nullptr, FALSE);
         // HWND child controls use GDI. Repaint after Direct2D presents the parent,
         // so a parent animation cannot cover the edit's text or caret.
         if (IsWindow(edit))
@@ -1104,8 +1148,6 @@ class App {
         case WM_SIZE:
             if (app->edit) {
                 app->layout();
-                if (app->target)
-                    app->target->Resize(D2D1::SizeU(LOWORD(lp), HIWORD(lp)));
                 InvalidateRect(hwnd, nullptr, FALSE);
             }
             return 0;
@@ -1307,6 +1349,24 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int show) {
     INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_STANDARD_CLASSES};
     InitCommonControlsEx(&controls);
     App app;
+#ifdef SQUEEZE_UI_TESTING
+    int testArgc = 0;
+    auto testArgv = CommandLineToArgvW(GetCommandLineW(), &testArgc);
+    if (testArgv) {
+        for (int i = 1; i < testArgc; ++i) {
+            std::wstring argument = testArgv[i];
+            if (argument == L"--ui-test-no-icons")
+                app.testMissingIcons = true;
+            else if (argument == L"--ui-test-device-loss")
+                app.testDeviceLoss = true;
+            else if (argument == L"--ui-test-dpi=120")
+                app.testDpi = 120;
+            else if (argument == L"--ui-test-dpi=144")
+                app.testDpi = 144;
+        }
+        LocalFree(testArgv);
+    }
+#endif
     WNDCLASSEXW windowClass{sizeof(windowClass)};
     windowClass.lpfnWndProc = App::windowProc;
     windowClass.hInstance = instance;
@@ -1316,6 +1376,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int show) {
     windowClass.hIconSm = windowClass.hIcon;
     RegisterClassExW(&windowClass);
     UINT dpi = GetDpiForSystem();
+#ifdef SQUEEZE_UI_TESTING
+    if (app.testDpi)
+        dpi = app.testDpi;
+#endif
     int width = MulDiv(940, dpi, 96), height = MulDiv(648, dpi, 96);
     RECT work{};
     SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);

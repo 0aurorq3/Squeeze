@@ -6,8 +6,8 @@
 103 RCDATA "resources/brand.png"
 104 RCDATA "resources/mark.png"
 1 VERSIONINFO
- FILEVERSION 1,0,0,0
- PRODUCTVERSION 1,0,0,0
+ FILEVERSION 1,0,1,0
+ PRODUCTVERSION 1,0,1,0
  FILEFLAGSMASK 0x3fL
  FILEFLAGS 0
  FILEOS VOS_NT_WINDOWS32
@@ -19,11 +19,11 @@ BEGIN
   BEGIN
    VALUE "CompanyName", "Squeeze Project"
    VALUE "FileDescription", "Squeeze Video Compressor"
-   VALUE "FileVersion", "1.0.0"
+   VALUE "FileVersion", "1.0.1"
    VALUE "InternalName", "Squeeze"
    VALUE "OriginalFilename", "Squeeze.exe"
    VALUE "ProductName", "Squeeze"
-   VALUE "ProductVersion", "1.0.0"
+   VALUE "ProductVersion", "1.0.1"
   END
  END
  BLOCK "VarFileInfo"

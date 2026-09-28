@@ -38,7 +38,16 @@ Detection returns NVIDIA NVENC followed by x264 on this host. AMD AMF and Intel 
 
 Final executable: dist/Squeeze.exe, 5,828,608 bytes.
 
-SHA-256: 8f03eaf5f29ab9672aa71886d7384be8a8e4174606cb2b41cb15c60be272c203.
+SHA-256: 3d44936f2212ff9a2e75e7d6f59b3e0a12837083f40810d2109e3a881f7be5b3.
+
+## v1.0.1 rendering compatibility
+
+- The UI now uses Direct2D software rasterization with GDI presentation. It does not create a display-GPU render target. Video hardware detection and encoding remain unchanged.
+- Optional icon decode/upload failures no longer abort the entire paint operation. Embedded PNGs use the Windows PNG decoder directly. Thumbnail pixels are cached independently of render targets, and failed draws invalidate and recreate graphics resources.
+- The release GUI was visually checked at 100% scaling. A separate instrumented executable verified 125% scaling with unavailable icon resources and a forced render-target loss together: cards, labels, numeric input, buttons, and the animated units menu remained visible and responsive.
+- All 22 core checks pass. An actual GUI encode of the 8-second sample produces 244,983 bytes against 300,000 bytes and retains 1280×720, 30 fps, all 240 frames, and the 8-second duration.
+- The reported Windows 11 / RTX 4060 Laptop / i7-13620H machine was not locally available. The failure conditions were simulated on the development PC.
+- API reference: [Direct2D GDI render targets](https://learn.microsoft.com/en-us/windows/win32/api/d2d1/nn-d2d1-id2d1dcrendertarget).
 
 ## MIT source release
 

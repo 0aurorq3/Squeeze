@@ -30,3 +30,13 @@ Image and binary resources are included and used directly by the build. No asset
 ```
 
 See [Verification](VERIFICATION.md) for encoding and portability results.
+
+UI regression checks (separate test executable):
+
+```powershell
+.\scripts\build-native.cmd ui-tests
+.\build\SqueezeUiTests.exe --ui-test-dpi=120 --ui-test-no-icons
+.\build\SqueezeUiTests.exe --ui-test-dpi=120 --ui-test-device-loss
+```
+
+These checks exercise 125% scaling, unavailable decorative images, and render-target recreation. Test switches are excluded from the release executable.

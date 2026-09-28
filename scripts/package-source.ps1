@@ -1,3 +1,4 @@
+param([ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version = '1.0.1')
 $ErrorActionPreference = 'Stop'
 $taskProject = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $taskStage = Join-Path $taskProject ('build\source-package-' + [Guid]::NewGuid().ToString('N'))
@@ -9,7 +10,7 @@ foreach ($taskName in @('src','tests','scripts','assets','docs','third_party','R
 New-Item -ItemType Directory -Path (Join-Path $taskStage 'generated') -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $taskProject 'generated\payload.hpp') -Destination (Join-Path $taskStage 'generated')
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-$taskArchive = Join-Path $taskDestination 'Squeeze-1.0-source.zip'
+$taskArchive = Join-Path $taskDestination ('Squeeze-' + $Version + '-source.zip')
 if (Test-Path -LiteralPath $taskArchive) { Remove-Item -LiteralPath $taskArchive }
 [IO.Compression.ZipFile]::CreateFromDirectory($taskStage,$taskArchive,[IO.Compression.CompressionLevel]::Optimal,$false)
 Get-Item -LiteralPath $taskArchive | Select-Object Name,Length

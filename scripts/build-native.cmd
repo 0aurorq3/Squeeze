@@ -17,5 +17,11 @@ cl /nologo /std:c++20 /utf-8 /O1 /GL /Gy /MT /W4 /EHsc /DUNICODE /D_UNICODE /DWI
 if errorlevel 1 exit /b 1
 link /nologo /LTCG /OPT:REF /OPT:ICF /SUBSYSTEM:CONSOLE /MANIFEST:NO /OUT:build\SqueezeTests.exe build\core_tests.obj build\engine.obj build\app.res ole32.lib shell32.lib dxgi.lib bcrypt.lib cabinet.lib uuid.lib
 if errorlevel 1 exit /b 1
+if "%~1"=="ui-tests" (
+  cl /nologo /std:c++20 /utf-8 /O1 /GL /Gy /MT /W4 /EHsc /DUNICODE /D_UNICODE /DWIN32_LEAN_AND_MEAN /DNOMINMAX /DSQUEEZE_UI_TESTING /Isrc /Igenerated /Fo:build\app_ui_tests.obj /c src\app.cpp
+  if errorlevel 1 exit /b 1
+  link /nologo /LTCG /OPT:REF /OPT:ICF /SUBSYSTEM:WINDOWS /MANIFEST:NO /OUT:build\SqueezeUiTests.exe build\app_ui_tests.obj build\engine.obj build\app.res d2d1.lib dwrite.lib windowscodecs.lib ole32.lib shell32.lib dwmapi.lib dxgi.lib bcrypt.lib cabinet.lib comctl32.lib user32.lib gdi32.lib uuid.lib
+  if errorlevel 1 exit /b 1
+)
 popd
 exit /b 0

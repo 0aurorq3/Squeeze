@@ -19,4 +19,4 @@ MSYS2 MinGW GCC 16.2.0 supplies the statically linked compiler runtime. GCC runt
 
 The native application and engine binaries are linked without non-system DLL imports. Source archives keep their upstream license files. SHA-256 hashes are recorded in `sources/SHA256SUMS.txt`. The original icon is included as ready-to-use PNG and ICO image assets.
 
-`scripts/package-source.ps1` creates `source/Squeeze-1.0-source.zip` containing the app, build scripts, tests, icon, license files, and dependency sources. The app can be carried separately as one exe; keep this corresponding source package available with redistributions.
+`scripts/package-source.ps1` creates a versioned source ZIP containing the app, build scripts, tests, icon, license files, and dependency sources. The app can be carried separately as one exe; keep this corresponding source package available with redistributions.
